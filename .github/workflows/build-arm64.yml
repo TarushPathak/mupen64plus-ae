@@ -1,0 +1,56 @@
+name: Build APK (arm64 by default)
+
+# Run it from the Actions tab: "Build APK (arm64 by default)" -> Run workflow.
+# arm64-only is much faster; tick "all_abis" to build the original four CPU types.
+on:
+  workflow_dispatch:
+    inputs:
+      all_abis:
+        description: "Build every CPU type (slow). Leave off for arm64 only."
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 9477386
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: adopt
+
+      - name: Environment variables
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Keep only arm64-v8a (skipped when all_abis is ticked)
+        if: ${{ !inputs.all_abis }}
+        run: |
+          grep -rl 'abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"' --include=*.gradle . | xargs sed -i 's/abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/abiFilters "arm64-v8a"/'
+          sed -i 's/^APP_ABI := armeabi-v7a arm64-v8a x86 x86_64/APP_ABI := arm64-v8a/' ndkLibs/rcheevos-build/Application.mk
+          echo "--- remaining ABI settings:"
+          grep -rn 'abiFilters\|^APP_ABI' --include=*.gradle --include=Application.mk . | grep -v upstream/ || true
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends file gawk
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: n64-emulator-apk
+          path: app/build/outputs/apk/release/*.apk
